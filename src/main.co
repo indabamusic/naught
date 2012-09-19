@@ -35,9 +35,17 @@ function chompArgv(obj, argv)
     try
       pids = JSON.parse(data)
     catch
-      console.error "Invalid pidfile: #{pidfile}"
+      console.error "Invalid pidfile: #pidfile"
       process.exit(1)
-    cb(pids)
+    ps = require('./ps')
+    ps.isRunning pids.master, !(err, is_running) ->
+      assert.ifError err
+      if not is_running
+        console.error "server not running"
+        fs.unlinkSync(pidfile)
+        process.exit(1)
+        return
+      cb(pids)
 
 function getDaemonMessages (socket_path, cbs)
   socket = net.connect socket_path, cbs.ready
@@ -82,7 +90,7 @@ function getDaemonMessages (socket_path, cbs)
     catch e
       if e.code is \ESRCH
         console.error("No process killed with pid #{pids.master}.")
-        console.error("`rm #{pidfile}` manually after ensuring your server is not already running.")
+        console.error("`rm #pidfile` manually after ensuring your server is not already running.")
       else
         throw e
 

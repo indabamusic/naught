@@ -1,0 +1,6 @@
+const {execFile} = require('child_process')
+
+# cb(err, process_is_running)
+export !function isRunning(pid, cb)
+  child = execFile 'ps', ['-p', pid, '-o', 'comm='], !(err, stdout, stderr) ->
+    cb(not err and not stderr)
