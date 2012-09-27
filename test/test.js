@@ -1,3 +1,4 @@
+/*global describe before after it*/
 var fs, naught_bin, path, naught_main, assert, async, exec, spawn, steps, root, test_root, http, port, hostname, timeout, step_count, fse, zlib;
 
 fs = require('fs');
@@ -12,7 +13,7 @@ zlib = require('zlib');
 root = path.join(__dirname, "..");
 test_root = path.join(root, "test");
 naught_main = path.join(root, "lib", "main.js");
-port = 11904;
+port = process.env.PORT || 11904;
 hostname = 'localhost';
 timeout = 5;
 
@@ -83,74 +84,59 @@ function collectLogFiles(test_path, cb) {
 }
 
 function use(script) {
-  return {
-    info: "(test setup) use " + script,
-    fn: function (cb) {
-      fse.copy(path.join(test_root, script), path.join(test_root, "server.js"), cb);
-    },
-  };
+  return function (cb) {
+    fse.copy(path.join(test_root, script), path.join(test_root, "server.js"), cb);
+  }
 }
 
 function mkdir(dir) {
-  return {
-    info: "(test setup) mkdir " + dir,
-    fn: function (cb) {
-      fse.mkdir(path.join(test_root, dir), cb);
-    },
-  };
+  return function (cb) {
+    fse.mkdir(path.join(test_root, dir), cb);
+  }
 }
 
 function rm(files) {
-  return {
-    info: "(test setup) rm " + files.join(" "),
-    fn: function (cb) {
-      async.forEach(files, function (item, cb) {
-        fs.unlink(path.join(test_root, item), cb);
-      }, cb);
-    },
-  }
-}
-
-function remove(files) {
-  return {
-    info: "(test setup) rm -rf " + files.join(" "),
-    fn: function (cb) {
-      async.forEach(files, function (item, cb) {
-        fse.remove(path.join(test_root, item), cb);
-      }, cb);
-    },
-  }
-}
-
-function get(info, url, expected_resp) {
-  return {
-    info: info,
-    fn: function (cb) {
-      http.request({
-        hostname: hostname,
-        port: port,
-        path: url,
-      }, function (res) {
-        var body;
-        assert.strictEqual(res.statusCode, 200);
-        body = ""
-        res.on('data', function(data) {
-          body += data;
-        });
-        res.on('end', function() {
-          assert.strictEqual(body, expected_resp);
-          cb();
-        });
-      }).end();
-    },
+  return function (cb) {
+    async.forEach(files, function (item, cb) {
+      fs.unlink(path.join(test_root, item), cb);
+    }, cb);
   };
 }
 
-steps = [
-  use("server1.js"),
-  {
-    info: "ability to start a server",
-    fn: function (cb) {
+function remove(files) {
+  return function (cb) {
+    async.forEach(files, function (item, cb) {
+      fse.remove(path.join(test_root, item), cb);
+    }, cb);
+  }
+}
+
+function get(url, expected_resp) {
+  return function (cb) {
+    http.request({
+      hostname: hostname,
+      port: port,
+      path: url,
+    }, function (res) {
+      var body;
+      assert.strictEqual(res.statusCode, 200);
+      body = ""
+      res.on('data', function(data) {
+        body += data;
+      });
+      res.on('end', function() {
+        assert.strictEqual(body, expected_resp);
+        cb();
+      });
+    }).end();
+  }
+}
+
+describe("naught", function() {
+  describe("using server1.js", function () {
+    before(use("server1.js"))
+
+    it("starts a server", function (cb) {
       naught_exec(["start", "server.js"], {
         PORT: port,
         hi: "sup dawg",
@@ -162,35 +148,33 @@ steps = [
         assert.strictEqual(code, 0)
         cb();
       });
-    },
-  },
-  {
-    info: "starting a server twice prints the status of the running server",
-    fn: function (cb) {
+    })
+
+    it("prints the status of the running server when run twice", function (cb) {
       naught_exec(["start", "server.js"], {}, function(stdout, stderr, code) {
         assert.strictEqual(stderr, "");
         assert.strictEqual(stdout, "workers online: 1\n");
         assert.strictEqual(code, 1)
         cb();
       });
-    },
-  },
-  {
-    info: "ability to query status of a running server",
-    fn: function (cb) {
+    })
+
+    it("queries the status of a running server", function (cb) {
       naught_exec(["status"], {}, function(stdout, stderr, code) {
         assert.strictEqual(stderr, "");
         assert.strictEqual(stdout, "workers online: 1\n");
         assert.strictEqual(code, 0)
         cb();
       });
-    },
-  },
-  get("make sure the server is up", "/hi", "server1 sup dawg"),
-  use("server2.js"),
-  {
-    info: "ability to deploy to a running server",
-    fn: function (cb) {
+    })
+
+    it("is up and running", get("/hi", "server1 sup dawg"))
+  })
+
+  describe("using server2.js", function () {
+    before(use("server1.js"))
+
+    it("deploys to a running server", function (cb) {
       naught_exec(["deploy"], {hi: "hola"}, function(stdout, stderr, code) {
         assert.strictEqual(stderr,
           "SpawnNew. booting: 0, online: 1, dying: 0, new_booting: 1, new_online: 0\n" +
@@ -202,12 +186,11 @@ steps = [
         assert.strictEqual(code, 0)
         cb();
       });
-    },
-  },
-  get("ability to change environment variables of workers", "/hi", "server2 hola"),
-  {
-    info: "ability to stop a running server",
-    fn: function (cb) {
+    })
+
+    it("changes environment variables of workers", get("/hi", "server2 hola"))
+
+    it("stops a running server", function (cb) {
       naught_exec(["stop"], {}, function(stdout, stderr, code) {
         assert.strictEqual(stderr,
           "ShutdownOld. booting: 0, online: 0, dying: 1, new_booting: 0, new_online: 0\n" +
@@ -216,42 +199,34 @@ steps = [
         assert.strictEqual(code, 0)
         cb();
       });
-    },
-  },
-  {
-    info: "stopping a server twice prints helpful output",
-    fn: function (cb) {
+    })
+
+    it("prints helpful output when stopping a server twice", function (cb) {
       naught_exec(["stop"], {}, function(stdout, stderr, code) {
         assert.strictEqual(stdout, "");
         assert.strictEqual(stderr, "server not running\n");
         assert.strictEqual(code, 1)
         cb();
       });
-    },
-  },
-  {
-    info: "redirect stdout to log file",
-    fn: function (cb) {
+    })
+
+    it("redirects stdout to a log file", function (cb) {
       fs.readFile(path.join(test_root, "stdout.log"), "utf8", function (err, contents) {
         assert.strictEqual(contents, "server1 attempting to listen\n" +
           "server2 attempting to listen\n");
         cb();
       });
-    },
-  },
-  {
-    info: "redirect stderr to log file",
-    fn: function (cb) {
+    })
+
+    it("redirects stderr to a log file", function (cb) {
       fs.readFile(path.join(test_root, "stderr.log"), "utf8", function (err, contents) {
         assert.strictEqual(contents, "server1 listening\n" +
           "server2 listening\n");
         cb();
       });
-    },
-  },
-  {
-    info: "naught log contains events",
-    fn: function (cb) {
+    })
+
+    it("writes events to a naught log", function (cb) {
       fs.readFile(path.join(test_root, "naught.log"), "utf8", function (err, contents) {
         assert.strictEqual(contents,
           "Bootup. booting: 1, online: 0, dying: 0, new_booting: 0, new_online: 0\n" +
@@ -269,14 +244,16 @@ steps = [
           "Shutdown. booting: 0, online: 0, dying: 0, new_booting: 0, new_online: 0\n");
         cb();
       });
-    },
-  },
-  rm(["naught.log", "stderr.log", "stdout.log", "server.js"]),
-  use("server3.js"),
-  mkdir("foo"),
-  {
-    info: "cli accepts non-default args",
-    fn: function (cb) {
+    })
+
+    after(rm(["naught.log", "stderr.log", "stdout.log", "server.js"]))
+  })
+
+  describe("using server3.js", function () {
+    before(use("server3.js"))
+    before(mkdir("foo"))
+
+    it("accepts non-default args", function (cb) {
       naught_exec([
           "start",
           "--worker-count", "5",
@@ -302,17 +279,20 @@ steps = [
         assert.strictEqual(stdout, "workers online: 5\n")
         assert.strictEqual(code, 0)
         cb();
-      });
-    },
-  },
-  get("command line arguments passed to server correctly", "/argv", "--custom1,aoeu,herp derp"),
-  get("multi-worker server responding to get requests", "/stdout", "stdout3"),
-  get("(test setup) generate log output", "/stderr", "stderr3"),
-  get("(test setup) generate log output", "/stdout", "stdout3"),
-  get("(test setup) generate log output", "/stderr", "stderr3"),
-  {
-    info: "ability to stop a running server with multiple workers",
-    fn: function (cb) {
+      })
+    })
+
+    it("passes command line arguments to server correctly", get("/argv", "--custom1,aoeu,herp derp"))
+
+    it("responds to get requests with multiple workers", get("/stdout", "stdout3"))
+  })
+
+  describe("with sufficient log output to rotate", function () {
+    before(get("/stderr", "stderr3"))
+    before(get("/stdout", "stdout3"))
+    before(get("/stderr", "stderr3"))
+
+    it("stops a running server with multiple workers", function (cb) {
       naught_exec(["stop", "some/dir/ipc"], {}, function(stdout, stderr, code) {
         assert.strictEqual(stderr,
           "ShutdownOld. booting: 0, online: 4, dying: 1, new_booting: 0, new_online: 0\n" +
@@ -329,11 +309,9 @@ steps = [
         assert.strictEqual(code, 0)
         cb();
       });
-    },
-  },
-  {
-    info: "log rotation and gzipping: naught log",
-    fn: function (cb) {
+    })
+
+    it("rotates and gzips naught log", function (cb) {
       collectLogFiles("log/naught", function (err, files, data) {
         if (err) return cb(err)
         assert.strictEqual(files.length, 4);
@@ -358,11 +336,9 @@ steps = [
           "Shutdown. booting: 0, online: 0, dying: 0, new_booting: 0, new_online: 0\n");
         cb();
       });
-    },
-  },
-  {
-    info: "log rotation and gzipping: stderr log",
-    fn: function (cb) {
+    })
+
+    it("rotates and gzips stderr log", function (cb) {
       collectLogFiles("log/stderr", function (err, files, data) {
         if (err) return cb(err)
         assert.strictEqual(files.length, 2);
@@ -380,11 +356,9 @@ steps = [
           "3 stderr abcdefghijklmnopqrstuvwxyz123456789101121314151617181920\n");
         cb();
       });
-    },
-  },
-  {
-    info: "log rotation and gzipping: stdout log",
-    fn: function (cb) {
+    })
+
+    it("rotates and gzips stdout log", function (cb) {
       collectLogFiles("log/stdout", function (err, files, data) {
         if (err) return cb(err)
         assert.strictEqual(files.length, 2);
@@ -402,13 +376,14 @@ steps = [
           "3 stdout abcdefghijklmnopqrstuvwxyz123456789101121314151617181920\n");
         cb();
       });
-    },
-  },
-  remove(["foo", "log", "some", "server.js"]),
-  use("server4.js"),
-  {
-    info: "(test setup) starting a server that won't shut down",
-    fn: function (cb) {
+    })
+
+    after(remove(["foo", "log", "some", "server.js"]))
+  })
+
+  describe("using server4.js", function () {
+    // start a server that won't shut down
+    before(function (cb) {
       naught_exec(["start", "--worker-count", "2", "server.js"], {
         PORT: port,
       }, function(stdout, stderr, code) {
@@ -420,11 +395,9 @@ steps = [
         assert.strictEqual(code, 0)
         cb();
       });
-    },
-  },
-  {
-    info: "ability to stop a hanging server with a timeout",
-    fn: function (cb) {
+    })
+    
+    it("stops a hanging server with a timeout", function (cb) {
       naught_exec(["stop", "--timeout", "0.3"], {}, function(stdout, stderr, code) {
         assert.strictEqual(stderr,
           "ShutdownOld. booting: 0, online: 1, dying: 1, new_booting: 0, new_online: 0\n" +
@@ -437,31 +410,9 @@ steps = [
         assert.strictEqual(code, 0)
         cb();
       });
-    },
-  },
-  rm(["naught.log", "stderr.log", "stdout.log", "server.js"]),
-];
+    })
 
-function doStep() {
-  var step, interval;
+    after(rm(["naught.log", "stderr.log", "stdout.log", "server.js"]))
+  })
+})
 
-  step = steps.shift();
-  process.stderr.write(step.info + "...")
-  interval = setTimeout(function() {
-    fs.writeSync(process.stderr.fd, "timeout\n")
-    process.exit(1);
-  }, timeout * 1000);
-  step.fn(function (err) {
-    assert.ifError(err);
-    clearTimeout(interval);
-    process.stderr.write("pass\n");
-    if (steps.length === 0) {
-      process.stderr.write(step_count + " tests passed\n");
-    } else {
-      doStep();
-    }
-  });
-}
-
-step_count = steps.length;
-doStep();
